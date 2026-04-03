@@ -1,0 +1,43 @@
+environment:
+  name: FluxRoute
+  version: "1.0.0"
+  description: >
+    Constrained-inference RL environment for adaptive network routing in
+    CDN / data-center-like topologies.  A lightweight DQN policy selects
+    next-hop routing decisions to minimise latency and balance link
+    utilisation, all under strict 2-vCPU / 8 GB RAM CPU-only limits.
+  author: FluxRoute Team
+  license: MIT
+
+tasks:
+  - id: easy_static_mesh
+    description: "Small 4×4 mesh with stationary moderate traffic. Focus: reduce mean latency."
+    difficulty: easy
+  - id: medium_bursty_dc
+    description: "3-tier data-center topology with bursty hotspot traffic. Focus: load balance + low packet loss."
+    difficulty: medium
+  - id: hard_failure_shift
+    description: "Medium graph with mixed priorities and sudden link failures. Focus: resilience under disruption."
+    difficulty: hard
+
+endpoints:
+  reset: /reset
+  step: /step
+  state: /state
+  health: /health
+
+inference:
+  script: inference.py
+  max_runtime_minutes: 20
+  target_runtime_minutes: 12
+
+resources:
+  max_vcpu: 2
+  max_ram_gb: 8
+  target_ram_gb: 4
+  gpu_required: false
+
+docker:
+  port: 7860
+  dockerfile: Dockerfile
+  start_command: ./start.sh
