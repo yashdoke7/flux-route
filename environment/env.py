@@ -28,9 +28,10 @@ from environment.models import (
 )
 from environment.reward import RewardCalculator, RewardCoefficients
 from environment.simulator.events import EventScheduler
-from environment.simulator.network import Network
+from environment.simulator.network import Network, GLOBAL_MAX_DEGREE
 from environment.simulator.traffic import Packet, TrafficGenerator
 from environment.tasks.task_bank import TaskConfig, get_task
+
 
 # ensure tasks are registered on import
 import environment.tasks.easy_static_mesh   # noqa: F401
@@ -135,7 +136,7 @@ class RoutingEnv:
         if self._current_packet is not None:
             pkt = self._current_packet
             nbrs = self._network.neighbors(pkt.source)
-            max_deg = self._network.max_degree
+            max_deg = self.max_degree
 
             # validate action
             idx = action.next_hop_index
@@ -276,7 +277,7 @@ class RoutingEnv:
 
     @property
     def max_degree(self) -> int:
-        return self._network.max_degree if self._network else 8
+        return GLOBAL_MAX_DEGREE
 
     @property
     def observation_size(self) -> int:

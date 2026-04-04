@@ -16,6 +16,13 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+GLOBAL_MAX_DEGREE = 8
+
+
+# ---------------------------------------------------------------------------
 # Link state attached to each edge
 # ---------------------------------------------------------------------------
 
@@ -94,7 +101,7 @@ class Network:
 
     @property
     def max_degree(self) -> int:
-        return self._max_degree
+        return GLOBAL_MAX_DEGREE
 
     @property
     def nodes(self) -> List[int]:
@@ -115,7 +122,7 @@ class Network:
     def padded_neighbor_info(
         self, node: int
     ) -> Tuple[List[int], List[float], List[float], List[float], List[int]]:
-        """Return padded arrays (to max_degree) of neighbor data.
+        """Return padded arrays (to GLOBAL_MAX_DEGREE) of neighbor data.
 
         Returns (ids, latency, queue, util, action_mask).
         """
@@ -135,7 +142,7 @@ class Network:
             mask.append(0 if ls.failed else 1)
 
         # pad
-        pad_len = self._max_degree - len(nbrs)
+        pad_len = GLOBAL_MAX_DEGREE - len(nbrs)
         ids.extend([-1] * pad_len)
         lat.extend([0.0] * pad_len)
         que.extend([0.0] * pad_len)
