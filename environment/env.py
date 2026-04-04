@@ -37,6 +37,7 @@ from environment.tasks.task_bank import TaskConfig, get_task
 import environment.tasks.easy_static_mesh   # noqa: F401
 import environment.tasks.medium_bursty_dc   # noqa: F401
 import environment.tasks.hard_failure_shift # noqa: F401
+import environment.tasks.research_burst     # noqa: F401
 
 logger = logging.getLogger("fluxroute.env")
 
@@ -94,6 +95,7 @@ class RoutingEnv:
         self._metrics = EpisodeMetrics()
         self._recent_latencies.clear()
         self._recent_drops.clear()
+        self._prev_queues: Dict[Tuple[int, int], float] = {}
 
         # generate initial packets and pick the first one
         self._packet_queue.clear()
@@ -194,6 +196,21 @@ class RoutingEnv:
 
         # compute reward
         util_mean, util_std = self._network.global_stats()
+        
+        # FIB path identification
+        is_fib = False
+        if self._current_packet is not None and not invalid:
+            # check if chosen neighbor was the shortest one
+            ids, _, _, _, _, dsts = self._network.padded_neighbor_info(
+                self._current_packet.source, self._current_packet.destination
+            )
+            valid_dsts = [d for d, m in zip(dsts, mask) if m == 1]
+            if valid_dsts:
+                min_d = min(valid_dsts)
+                # if current neighbor's dist == min dist
+                if idx < len(dsts) and dsts[idx] == min_d:
+                    is_fib = True
+
         reward, components = self.reward_calc.compute(
             hop_latency_ms=hop_latency,
             queue_occupancy=queue_occ,
@@ -202,6 +219,8 @@ class RoutingEnv:
             delivered=delivered,
             util_mean=util_mean,
             util_std=util_std,
+            is_fib_path=is_fib,
+            is_backtracking=(not is_fib and idx < len(dsts) and dsts[idx] > self._network.get_distance(self._current_packet.source, self._current_packet.destination)) if (self._current_packet and not invalid) else False,
         )
         self._metrics.step_rewards.append(reward)
 
@@ -283,9 +302,9 @@ class RoutingEnv:
 
     @property
     def observation_size(self) -> int:
-        """Flat vector size for RL input."""
-        # 7 scalars + 6*max_degree (ids, hops, lat, queue, util, mask)
-        return 7 + 6 * self.max_degree
+        """Flat vector size for RL input. (72 if max_deg=8)"""
+        # 8 scalars + 8*max_degree (ids, hops, lat, queue, util, mask, trend, lookahead)
+        return 8 + 8 * self.max_degree
 
     def obs_to_flat(self, obs: Observation) -> List[float]:
         """Convert observation to flat float vector for neural net."""
@@ -297,18 +316,20 @@ class RoutingEnv:
             obs.global_utilization_mean,
             obs.global_utilization_std,
             obs.recent_drop_rate,
+            obs.current_hops_to_dest / 20.0,
         ]
-        vec.extend(
-            [l / 20.0 for l in obs.local_link_latency_ms]  # normalize
-        )
+        vec.extend([l / 20.0 for l in obs.local_link_latency_ms])
         vec.extend(obs.local_link_queue)
         vec.extend(obs.local_link_utilization)
         vec.extend([float(x) for x in obs.action_mask])
-        # neighbor IDs normalised
+        
         max_n = max(max(obs.local_neighbor_ids, default=1), 1)
         vec.extend([max(0, n) / max_n for n in obs.local_neighbor_ids])
-        # neighbor hop distances normalised (max diameter ~20)
         vec.extend([h / 20.0 for h in obs.local_neighbor_hops_to_dest])
+        
+        # trends (clamped [-1, 1]) and lookahead (util [0,1])
+        vec.extend([np.clip(t, -1.0, 1.0) for t in obs.local_neighbor_queue_trend])
+        vec.extend(obs.local_neighbor_utilization_avg)
         return vec
 
     @property
@@ -325,9 +346,9 @@ class RoutingEnv:
 
     def _build_observation(self) -> Observation:
         pkt = self._current_packet
+        md = self.max_degree
+        
         if pkt is None or self._network is None or self._task_cfg is None:
-            # dummy observation when no active packet
-            md = self.max_degree
             return Observation(
                 episode_id=self._episode_id,
                 task_id=self._task_cfg.task_id if self._task_cfg else "",
@@ -339,31 +360,55 @@ class RoutingEnv:
                 packet_priority=0.0,
                 local_neighbor_ids=[-1] * md,
                 local_neighbor_hops_to_dest=[0.0] * md,
+                local_neighbor_queue_trend=[0.0] * md,
+                local_neighbor_utilization_avg=[0.0] * md,
                 local_link_latency_ms=[0.0] * md,
                 local_link_queue=[0.0] * md,
                 local_link_utilization=[0.0] * md,
                 global_utilization_mean=0.0,
                 global_utilization_std=0.0,
-                recent_drop_rate=0.0,
+                recent_recent_drop_rate=0.0,
                 recent_p95_latency_ms=0.0,
+                current_hops_to_dest=0.0,
                 action_mask=[0] * md,
             )
 
         ids, lat, que, uti, mask, dsts = self._network.padded_neighbor_info(
             pkt.source, pkt.destination
         )
-        g_mean, g_std = self._network.global_stats()
+        
+        # calculate trends and lookahead
+        trends: List[float] = []
+        lookahead: List[float] = []
+        
+        for i, nb_id in enumerate(ids):
+            if nb_id == -1:
+                trends.append(0.0)
+                lookahead.append(0.0)
+                continue
+            
+            # trend: current - previous queue
+            edge = (pkt.source, nb_id)
+            prev_q = self._prev_queues.get(edge, que[i])
+            trends.append(que[i] - prev_q)
+            self._prev_queues[edge] = que[i]
+            
+            # lookahead: avg utilization of neighbor's outgoing links
+            nb_nbrs = self._network.neighbors(nb_id)
+            if nb_nbrs:
+                nb_utils = [self._network.get_link(nb_id, nn).utilization for nn in nb_nbrs]
+                lookahead.append(float(np.mean(nb_utils)))
+            else:
+                lookahead.append(0.0)
 
-        # recent stats
-        drop_rate = (
-            sum(self._recent_drops) / max(len(self._recent_drops), 1)
-        )
+        g_mean, g_std = self._network.global_stats()
+        drop_rate = sum(self._recent_drops) / max(len(self._recent_drops), 1)
+        
+        # p95
+        p95 = 0.0
         if self._recent_latencies:
             sorted_lat = sorted(self._recent_latencies)
-            p95_idx = int(0.95 * len(sorted_lat))
-            p95 = sorted_lat[min(p95_idx, len(sorted_lat) - 1)]
-        else:
-            p95 = 0.0
+            p95 = sorted_lat[min(int(0.95 * len(sorted_lat)), len(sorted_lat) - 1)]
 
         return Observation(
             episode_id=self._episode_id,
@@ -376,6 +421,8 @@ class RoutingEnv:
             packet_priority=pkt.priority,
             local_neighbor_ids=ids,
             local_neighbor_hops_to_dest=dsts,
+            local_neighbor_queue_trend=trends,
+            local_neighbor_utilization_avg=lookahead,
             local_link_latency_ms=lat,
             local_link_queue=que,
             local_link_utilization=uti,
@@ -383,5 +430,6 @@ class RoutingEnv:
             global_utilization_std=g_std,
             recent_drop_rate=drop_rate,
             recent_p95_latency_ms=p95,
+            current_hops_to_dest=float(self._network.get_distance(pkt.source, pkt.destination)),
             action_mask=mask,
         )

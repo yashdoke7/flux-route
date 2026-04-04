@@ -29,13 +29,20 @@ class Observation(BaseModel):
     current_node: int = Field(..., ge=0)
     destination_node: int = Field(..., ge=0)
     packet_priority: float = Field(..., ge=0.0, le=1.0)
+    current_hops_to_dest: float = Field(0.0, description="Progress sensing: current node distance to destination")
 
     # Local neighbourhood (padded to max_degree)
     local_neighbor_ids: List[int] = Field(
         ..., description="Neighbor node IDs; -1 = padding"
     )
     local_neighbor_hops_to_dest: List[float] = Field(
-        ..., description="Shortest path distance from neighbor to destination"
+        ..., description="Static RIB metric: hops from neighbor to destination"
+    )
+    local_neighbor_queue_trend: List[float] = Field(
+        ..., description="Rate of change of neighbor queue occupancy (current - prev)"
+    )
+    local_neighbor_utilization_avg: List[float] = Field(
+        ..., description="Average utilization of neighbor's neighbors (1-hop lookahead)"
     )
     local_link_latency_ms: List[float] = Field(
         ..., description="Per-link propagation latency (ms)"

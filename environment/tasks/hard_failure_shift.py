@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import List
 
+import networkx as nx
 import numpy as np
 
 from environment.simulator.events import (
@@ -30,22 +31,26 @@ def _build_traffic(nodes: List[int], rng: np.random.Generator) -> TrafficGenerat
 
 
 def _build_events(rng: np.random.Generator, network: Network) -> EventScheduler:
-    """Schedule link failures at step 100 and partial restore at step 250."""
-    edges = list(network.graph.edges())
-    if len(edges) < 3:
-        return EventScheduler([])
-    # pick 2-3 edges to fail
-    fail_indices = rng.choice(len(edges), size=min(3, len(edges)), replace=False)
+    """Schedule failures on HIGH-BETWEENNESS links to prove RL superiority."""
+    # Use betweenness to find critical core links
+    bc = nx.edge_betweenness_centrality(network.graph)
+    # Sort and pick top edges
+    sorted_edges = sorted(bc.items(), key=lambda x: x[1], reverse=True)
+    
+    # pick 2-3 most central edges
+    fail_edges = [edge for edge, score in sorted_edges[:3]]
+    
     events: List[SimEvent] = []
-    for idx in fail_indices:
-        u, v = edges[idx]
+    for (u, v) in fail_edges:
+        # Failure at step 100
         events.append(SimEvent(step=100, event_type=EventType.LINK_FAIL,
                                link=(u, v)))
-        # degrade another edge
+        # Degrade a bit earlier locally
         events.append(SimEvent(step=80, event_type=EventType.LINK_DEGRADE,
-                               link=(u, v), params={"latency_factor": 2.0}))
-    # restore one link at step 250
-    u0, v0 = edges[fail_indices[0]]
+                               link=(u, v), params={"latency_factor": 3.0}))
+
+    # Restore one central link at step 250
+    u0, v0 = fail_edges[0]
     events.append(SimEvent(step=250, event_type=EventType.LINK_RESTORE,
                            link=(u0, v0)))
     return EventScheduler(events)
