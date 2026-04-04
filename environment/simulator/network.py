@@ -84,6 +84,10 @@ class Network:
         self._max_degree: int = 0
         self._init_link_states()
 
+        # Static RIB: Precompute all-pairs shortest paths (hops)
+        # Represents the "Control Plane" background knowledge.
+        self._rib = dict(nx.all_pairs_shortest_path_length(self.graph))
+
     # -- construction helpers ------------------------------------------------
 
     def _init_link_states(self) -> None:
@@ -119,12 +123,19 @@ class Network:
     def get_link(self, u: int, v: int) -> LinkState:
         return self.link_states[(u, v)]
 
+    def get_distance(self, u: int, v: int) -> int:
+        """Get static hop distance via RIP/OSPF-like RIB."""
+        if u not in self._rib:
+            return 99
+        return self._rib[u].get(v, 99)
+
     def padded_neighbor_info(
-        self, node: int
-    ) -> Tuple[List[int], List[float], List[float], List[float], List[int]]:
+        self, node: int, destination: int | None = None
+    ) -> Tuple[List[int], List[float], List[float], List[float], List[int], List[float]]:
         """Return padded arrays (to GLOBAL_MAX_DEGREE) of neighbor data.
 
-        Returns (ids, latency, queue, util, action_mask).
+        Includes FIB metric (distance to destination) if provided.
+        Returns (ids, latency, queue, util, action_mask, dists).
         """
         nbrs = self.neighbors(node)
         ids: List[int] = []
@@ -132,6 +143,7 @@ class Network:
         que: List[float] = []
         uti: List[float] = []
         mask: List[int] = []
+        dsts: List[float] = []
 
         for nb in nbrs:
             ls = self.get_link(node, nb)
@@ -141,6 +153,13 @@ class Network:
             uti.append(ls.utilization)
             mask.append(0 if ls.failed else 1)
 
+            if destination is not None:
+                # distance from neighbor to destination
+                d = self.get_distance(nb, destination)
+                dsts.append(float(d))
+            else:
+                dsts.append(0.0)
+
         # pad
         pad_len = GLOBAL_MAX_DEGREE - len(nbrs)
         ids.extend([-1] * pad_len)
@@ -148,8 +167,9 @@ class Network:
         que.extend([0.0] * pad_len)
         uti.extend([0.0] * pad_len)
         mask.extend([0] * pad_len)
+        dsts.extend([0.0] * pad_len)
 
-        return ids, lat, que, uti, mask
+        return ids, lat, que, uti, mask, dsts
 
     def global_stats(self) -> Tuple[float, float]:
         """Return (mean_utilization, std_utilization) across all links."""

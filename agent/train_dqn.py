@@ -35,14 +35,14 @@ CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 def train(
     task_ids: list[str] | None = None,
-    total_episodes: int = 500,
-    lr: float = 1e-3,
+    total_episodes: int = 600,
+    lr: float = 5e-4,
     gamma: float = 0.99,
     batch_size: int = 64,
     buffer_capacity: int = 50000,
     eps_start: float = 1.0,
     eps_end: float = 0.05,
-    eps_decay_episodes: int = 300,
+    eps_decay_episodes: int = 400,
     target_update_freq: int = 10,
     seed: int = 42,
     save_path: str | None = None,

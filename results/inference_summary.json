@@ -1,0 +1,10 @@
+{
+  "total_runtime_seconds": 22.78043031692505,
+  "total_runtime_minutes": 0.3796738386154175,
+  "peak_memory_gb": 0.5055770874023438,
+  "final_memory_gb": 0.5437812805175781,
+  "within_time_limit": true,
+  "within_memory_limit": true,
+  "num_episodes": 60,
+  "policy_loaded": true
+}

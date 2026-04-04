@@ -34,6 +34,9 @@ class Observation(BaseModel):
     local_neighbor_ids: List[int] = Field(
         ..., description="Neighbor node IDs; -1 = padding"
     )
+    local_neighbor_hops_to_dest: List[float] = Field(
+        ..., description="Shortest path distance from neighbor to destination"
+    )
     local_link_latency_ms: List[float] = Field(
         ..., description="Per-link propagation latency (ms)"
     )

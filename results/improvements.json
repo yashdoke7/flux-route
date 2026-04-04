@@ -1,0 +1,17 @@
+{
+  "rl_vs_dijkstra": {
+    "easy_static_mesh": -1.6181703531699991,
+    "medium_bursty_dc": 0.004552968382086739,
+    "hard_failure_shift": -7.73559094416253
+  },
+  "rl_vs_ecmp": {
+    "easy_static_mesh": -1.6181703531699991,
+    "medium_bursty_dc": 0.004594638866591013,
+    "hard_failure_shift": -7.7355879523776165
+  },
+  "rl_vs_weighted_sp": {
+    "easy_static_mesh": -1.6181703531699991,
+    "medium_bursty_dc": 0.004552968382086739,
+    "hard_failure_shift": -7.73559094416253
+  }
+}

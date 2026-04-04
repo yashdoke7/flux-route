@@ -140,7 +140,9 @@ class RoutingEnv:
 
             # validate action
             idx = action.next_hop_index
-            _, _, _, _, mask = self._network.padded_neighbor_info(pkt.source)
+            _, _, _, _, mask, _ = self._network.padded_neighbor_info(
+                pkt.source, pkt.destination
+            )
 
             if idx >= max_deg or idx >= len(mask) or mask[idx] == 0:
                 # invalid action: penalise and don't move
@@ -282,8 +284,8 @@ class RoutingEnv:
     @property
     def observation_size(self) -> int:
         """Flat vector size for RL input."""
-        # 7 scalars + 4*max_degree + max_degree mask
-        return 7 + 5 * self.max_degree
+        # 7 scalars + 6*max_degree (ids, hops, lat, queue, util, mask)
+        return 7 + 6 * self.max_degree
 
     def obs_to_flat(self, obs: Observation) -> List[float]:
         """Convert observation to flat float vector for neural net."""
@@ -305,6 +307,8 @@ class RoutingEnv:
         # neighbor IDs normalised
         max_n = max(max(obs.local_neighbor_ids, default=1), 1)
         vec.extend([max(0, n) / max_n for n in obs.local_neighbor_ids])
+        # neighbor hop distances normalised (max diameter ~20)
+        vec.extend([h / 20.0 for h in obs.local_neighbor_hops_to_dest])
         return vec
 
     @property
@@ -334,6 +338,7 @@ class RoutingEnv:
                 destination_node=0,
                 packet_priority=0.0,
                 local_neighbor_ids=[-1] * md,
+                local_neighbor_hops_to_dest=[0.0] * md,
                 local_link_latency_ms=[0.0] * md,
                 local_link_queue=[0.0] * md,
                 local_link_utilization=[0.0] * md,
@@ -344,8 +349,8 @@ class RoutingEnv:
                 action_mask=[0] * md,
             )
 
-        ids, lat, que, uti, mask = self._network.padded_neighbor_info(
-            pkt.source
+        ids, lat, que, uti, mask, dsts = self._network.padded_neighbor_info(
+            pkt.source, pkt.destination
         )
         g_mean, g_std = self._network.global_stats()
 
@@ -370,6 +375,7 @@ class RoutingEnv:
             destination_node=pkt.destination,
             packet_priority=pkt.priority,
             local_neighbor_ids=ids,
+            local_neighbor_hops_to_dest=dsts,
             local_link_latency_ms=lat,
             local_link_queue=que,
             local_link_utilization=uti,
