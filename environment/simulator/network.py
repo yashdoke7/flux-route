@@ -1,8 +1,8 @@
 """
 FluxRoute – Network topology builder and link-state tracker.
 
-Wraps NetworkX graphs with per-link dynamic state (latency, queue, util)
-and provides deterministic topology constructors for each task.
+Implements M/M/1 queuing model for realistic latency computation.
+Dynamic RIB recomputation on topology changes (models OSPF SPF).
 """
 
 from __future__ import annotations
@@ -28,44 +28,88 @@ GLOBAL_MAX_DEGREE = 8
 
 @dataclass
 class LinkState:
-    """Mutable per-link state tracked during simulation."""
+    """Mutable per-link state tracked during simulation.
 
-    base_latency_ms: float = 1.0       # propagation delay
-    capacity: float = 100.0            # max throughput units
-    current_load: float = 0.0          # current traffic load
-    queue_occupancy: float = 0.0       # fraction [0, 1]
-    failed: bool = False               # link-failure flag
-    queue_max: float = 50.0            # packets before drop
+    Models a single network link with:
+    - M/M/1 queuing delay (standard teletraffic model)
+    - Tail-drop buffer management
+    - Utilization tracking from interface counters
+
+    Real-world mapping:
+        base_latency_ms  → propagation delay (fiber length / speed of light)
+        capacity         → link bandwidth in normalized units (maps to ifSpeed)
+        current_load     → measured arrival rate (ifHCInOctets delta / interval)
+        queue_occupancy  → buffer fill ratio (MEMORY-MAPPED ASIC counter)
+        failed           → carrier-detect / BFD session state
+        queue_max        → hardware buffer depth (memory-mapped register)
+    """
+
+    base_latency_ms: float = 1.0
+    capacity: float = 100.0
+    current_load: float = 0.0
+    queue_occupancy: float = 0.0
+    failed: bool = False
+    queue_max: float = 50.0
 
     @property
     def utilization(self) -> float:
+        """Link utilization ρ = load/capacity.
+
+        Real source: ifHCOutOctets counter / ifSpeed, polled via SNMP or gNMI.
+        """
         if self.capacity <= 0 or self.failed:
             return 1.0
         return min(self.current_load / self.capacity, 1.0)
 
     @property
     def effective_latency_ms(self) -> float:
-        """Latency with congestion-aware queuing delay."""
+        """Total link latency using M/M/1 queuing model.
+
+        M/M/1 theory (Erlang, 1917):
+            Packets arrive via Poisson process (rate λ).
+            Service times exponentially distributed (rate μ).
+            Traffic intensity ρ = λ/μ = utilization.
+            Mean system time W = (1/μ) / (1 - ρ).
+
+        Total latency = propagation_delay + queuing_delay
+        where queuing_delay = (1/μ) × ρ/(1-ρ).
+
+        We approximate 1/μ ≈ base_latency_ms (transmission time for one
+        packet at link speed).
+
+        Real measurement: BFD (Bidirectional Forwarding Detection, RFC 5880)
+        or TWAMP (Two-Way Active Measurement Protocol, RFC 5357).
+        """
         if self.failed:
-            return 1e6  # effectively infinite
-        queue_delay = self.base_latency_ms * (self.queue_occupancy ** 2) * 5.0
-        load_delay = self.base_latency_ms * max(0, self.utilization - 0.5) * 4.0
-        return self.base_latency_ms + queue_delay + load_delay
+            return 1e6
+        rho = min(self.utilization, 0.98)  # cap to prevent singularity
+        if rho < 0.01:
+            return self.base_latency_ms
+        queuing_delay = self.base_latency_ms * (rho / (1.0 - rho))
+        return self.base_latency_ms + queuing_delay
 
     def add_traffic(self, amount: float = 1.0) -> bool:
-        """Add load; returns False if packet is dropped."""
+        """Add a packet to the link buffer. Returns False if tail-dropped.
+
+        Real mechanism: The forwarding ASIC checks egress queue depth
+        before enqueuing. If depth >= buffer_size → tail-drop (RFC 2309).
+        """
         if self.failed:
             return False
         self.current_load += amount
-        self.queue_occupancy = min(
-            (self.queue_occupancy * self.queue_max + 1.0) / self.queue_max, 1.0
-        )
-        if self.queue_occupancy >= 1.0:
-            return False  # drop
+        new_queue = self.queue_occupancy + (amount / self.queue_max)
+        if new_queue >= 1.0:
+            return False  # tail-drop
+        self.queue_occupancy = new_queue
         return True
 
     def decay(self, factor: float = 0.9) -> None:
-        """Decay traffic load and queue between time steps."""
+        """Model packet departures (service completions) between steps.
+
+        Approximates the M/M/1 service process: between routing decisions,
+        the link continues draining its buffer at service rate μ.
+        factor=0.9 means ~10% of buffered traffic is served per step.
+        """
         self.current_load = max(0.0, self.current_load * factor)
         self.queue_occupancy = max(0.0, self.queue_occupancy * factor)
 
@@ -75,7 +119,7 @@ class LinkState:
 # ---------------------------------------------------------------------------
 
 class Network:
-    """NetworkX graph with link-state tracking."""
+    """NetworkX graph with link-state tracking and dynamic RIB."""
 
     def __init__(self, graph: nx.Graph, topology_id: str = "custom"):
         self.graph = graph
@@ -84,11 +128,9 @@ class Network:
         self._max_degree: int = 0
         self._init_link_states()
 
-        # Static RIB: Precompute all-pairs shortest paths (hops)
-        # Represents the "Control Plane" background knowledge.
+        # Static RIB: all-pairs shortest paths (hop count).
+        # Real-world: OSPF/IS-IS SPF computation stored in the RIB.
         self._rib = dict(nx.all_pairs_shortest_path_length(self.graph))
-
-    # -- construction helpers ------------------------------------------------
 
     def _init_link_states(self) -> None:
         for u, v, data in self.graph.edges(data=True):
@@ -102,6 +144,29 @@ class Network:
         self._max_degree = max(
             (self.graph.degree(n) for n in self.graph.nodes()), default=1
         )
+
+    # -- RIB management (OSPF SPF recomputation) ----------------------------
+
+    def recompute_rib(self) -> None:
+        """Recompute all-pairs shortest paths on live (non-failed) topology.
+
+        Real-world basis: When OSPF detects a topology change via LSA
+        (Link State Advertisement) flooding, every router runs the SPF
+        (Shortest Path First / Dijkstra) algorithm to rebuild its RIB.
+        This takes 10-200ms in production networks (SPF delay timer).
+        """
+        live_graph = nx.Graph()
+        for n in self.graph.nodes():
+            live_graph.add_node(n)
+        seen = set()
+        for (u, v), ls in self.link_states.items():
+            key = (min(u, v), max(u, v))
+            if key not in seen and not ls.failed:
+                seen.add(key)
+                live_graph.add_edge(u, v)
+        self._rib = dict(nx.all_pairs_shortest_path_length(live_graph))
+
+    # -- properties ----------------------------------------------------------
 
     @property
     def max_degree(self) -> int:
@@ -124,7 +189,7 @@ class Network:
         return self.link_states[(u, v)]
 
     def get_distance(self, u: int, v: int) -> int:
-        """Get static hop distance via RIP/OSPF-like RIB."""
+        """Get hop distance from RIB (accounts for link failures)."""
         if u not in self._rib:
             return 99
         return self._rib[u].get(v, 99)
@@ -134,8 +199,7 @@ class Network:
     ) -> Tuple[List[int], List[float], List[float], List[float], List[int], List[float]]:
         """Return padded arrays (to GLOBAL_MAX_DEGREE) of neighbor data.
 
-        Includes FIB metric (distance to destination) if provided.
-        Returns (ids, latency, queue, util, action_mask, dists).
+        Returns (ids, latency, queue, util, action_mask, dists_to_dest).
         """
         nbrs = self.neighbors(node)
         ids: List[int] = []
@@ -154,13 +218,12 @@ class Network:
             mask.append(0 if ls.failed else 1)
 
             if destination is not None:
-                # distance from neighbor to destination
                 d = self.get_distance(nb, destination)
                 dsts.append(float(d))
             else:
                 dsts.append(0.0)
 
-        # pad
+        # pad to GLOBAL_MAX_DEGREE
         pad_len = GLOBAL_MAX_DEGREE - len(nbrs)
         ids.extend([-1] * pad_len)
         lat.extend([0.0] * pad_len)
@@ -172,7 +235,11 @@ class Network:
         return ids, lat, que, uti, mask, dsts
 
     def global_stats(self) -> Tuple[float, float]:
-        """Return (mean_utilization, std_utilization) across all links."""
+        """Return (mean_utilization, std_utilization) across all links.
+
+        Real source: SDN controller aggregates interface counters from all
+        switches via OpenFlow or gNMI streaming telemetry (5-30s interval).
+        """
         utils = []
         seen = set()
         for (u, v), ls in self.link_states.items():
@@ -186,7 +253,7 @@ class Network:
         return float(arr.mean()), float(arr.std())
 
     def decay_all(self, factor: float = 0.92) -> None:
-        """Decay all link states (call once per timestep)."""
+        """Decay all link states (service completions per time step)."""
         seen = set()
         for (u, v), ls in self.link_states.items():
             key = (min(u, v), max(u, v))
@@ -195,19 +262,22 @@ class Network:
                 ls.decay(factor)
 
     def fail_link(self, u: int, v: int) -> None:
+        """Fail a link and recompute RIB (OSPF SPF on topology change)."""
         if (u, v) in self.link_states:
             self.link_states[(u, v)].failed = True
         if (v, u) in self.link_states:
             self.link_states[(v, u)].failed = True
+        self.recompute_rib()
 
     def restore_link(self, u: int, v: int) -> None:
+        """Restore a link and recompute RIB (OSPF SPF on topology change)."""
         if (u, v) in self.link_states:
             self.link_states[(u, v)].failed = False
         if (v, u) in self.link_states:
             self.link_states[(v, u)].failed = False
+        self.recompute_rib()
 
     def snapshot_utilizations(self) -> Dict[str, float]:
-        """Return edge_key -> utilization for logging."""
         out: Dict[str, float] = {}
         seen = set()
         for (u, v), ls in self.link_states.items():
@@ -242,7 +312,6 @@ def build_leaf_spine_dc(rng: np.random.Generator) -> Network:
     tors = list(range(12, 20))
     G.add_nodes_from(spines + leaves + tors)
 
-    # spine–leaf full mesh
     for s in spines:
         for l in leaves:
             G.add_edge(s, l,
@@ -250,7 +319,6 @@ def build_leaf_spine_dc(rng: np.random.Generator) -> Network:
                        capacity=float(rng.uniform(150, 250)),
                        queue_max=60.0)
 
-    # leaf–tor connectivity (each tor connects to 2 leaves)
     for i, t in enumerate(tors):
         l1 = leaves[i % len(leaves)]
         l2 = leaves[(i + 1) % len(leaves)]

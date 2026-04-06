@@ -17,7 +17,7 @@ class WeightedSPBaseline:
     """Congestion-aware shortest-path routing baseline."""
 
     def __init__(self):
-        self.name = "weighted_sp"
+        self.name = "Segment Routing (SR-TE)"
 
     def select_action(
         self,

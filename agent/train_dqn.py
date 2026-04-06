@@ -1,11 +1,15 @@
 """
 FluxRoute – DQN training script.
 
-Usage:
-    python -m agent.train_dqn [--episodes 500] [--task easy_static_mesh]
+Improvements over vanilla DQN:
+- Double DQN: decouples action selection from evaluation to reduce
+  overestimation bias (van Hasselt et al., 2016).
+- Soft target update (Polyak averaging): smoother than hard copy.
+- Exponential ε-decay: better exploration schedule.
+- Curriculum training across all tasks.
 
-Trains a small DQN policy with replay buffer and target network.
-Supports curriculum training across all three tasks.
+Usage:
+    python -m agent.train_dqn [--episodes 3000] [--task easy_static_mesh]
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import time
 from pathlib import Path
@@ -35,24 +40,30 @@ CHECKPOINT_DIR.mkdir(exist_ok=True)
 
 def train(
     task_ids: list[str] | None = None,
-    total_episodes: int = 600,
+    total_episodes: int = 3000,
     lr: float = 5e-4,
     gamma: float = 0.99,
     batch_size: int = 64,
-    buffer_capacity: int = 50000,
+    buffer_capacity: int = 100000,
     eps_start: float = 1.0,
     eps_end: float = 0.05,
-    eps_decay_episodes: int = 400,
-    target_update_freq: int = 10,
+    eps_decay_episodes: int = 800,
+    tau: float = 0.005,
     seed: int = 42,
     save_path: str | None = None,
 ) -> dict:
-    """Train DQN and return training stats."""
+    """Train Double-DQN and return training stats.
+
+    Key hyperparameters:
+        gamma:  Discount factor. 0.99 = agent values future rewards highly.
+        tau:    Polyak averaging coefficient for soft target update.
+                τ=0.005 means target net slowly tracks policy net.
+        eps_decay_episodes:  Exponential decay constant for ε-greedy.
+    """
     if task_ids is None:
         task_ids = ["easy_static_mesh", "medium_bursty_dc", "hard_failure_shift"]
 
     env = RoutingEnv()
-    # probe dimensions from easy task
     obs = env.reset(task_ids[0], seed=seed)
     obs_dim = env.observation_size
     max_deg = env.max_degree
@@ -77,9 +88,10 @@ def train(
         ep_seed = int(rng.integers(0, 2**31))
         obs = env.reset(task_id, seed=ep_seed)
 
-        # epsilon schedule
-        frac = min(1.0, ep / max(eps_decay_episodes, 1))
-        epsilon = eps_start + (eps_end - eps_start) * frac
+        # Exponential ε-decay (smoother than linear)
+        epsilon = eps_end + (eps_start - eps_end) * math.exp(
+            -ep / max(eps_decay_episodes, 1)
+        )
 
         ep_reward = 0.0
         obs_vec = env.obs_to_flat(obs)
@@ -104,9 +116,18 @@ def train(
             # train step
             if len(replay) >= batch_size:
                 s, a, r, ns, d, m, nm = replay.sample(batch_size)
+
+                # Current Q-values
                 q_vals = policy_net(s, m).gather(1, a.unsqueeze(1)).squeeze(1)
+
                 with torch.no_grad():
-                    next_q = target_net(ns, nm).max(1)[0]
+                    # Double DQN: select action with policy net,
+                    # evaluate with target net. This reduces the
+                    # overestimation bias of vanilla DQN.
+                    best_actions = policy_net(ns, nm).argmax(dim=1)
+                    next_q = target_net(ns, nm).gather(
+                        1, best_actions.unsqueeze(1)
+                    ).squeeze(1)
                     target = r + gamma * next_q * (1 - d)
 
                 loss = F.smooth_l1_loss(q_vals, target)
@@ -117,29 +138,38 @@ def train(
 
                 stats["losses"].append(float(loss.item()))
 
-        stats["episode_rewards"].append(ep_reward)
+                # Soft target update (Polyak averaging)
+                # θ_target ← τ·θ_policy + (1-τ)·θ_target
+                # Smoother than hard copy every N episodes.
+                for tp, pp in zip(
+                    target_net.parameters(), policy_net.parameters()
+                ):
+                    tp.data.copy_(tau * pp.data + (1.0 - tau) * tp.data)
 
-        # update target network
-        if ep % target_update_freq == 0:
-            target_net.load_state_dict(policy_net.state_dict())
+        stats["episode_rewards"].append(ep_reward)
 
         # save best
         if ep_reward > best_reward:
             best_reward = ep_reward
-            _save_checkpoint(policy_net, obs_dim, max_deg, save_path or str(CHECKPOINT_DIR / "policy_best.pt"))
+            _save_checkpoint(
+                policy_net, obs_dim, max_deg,
+                save_path or str(CHECKPOINT_DIR / "policy_best.pt"),
+            )
 
-        if ep % 50 == 0:
-            avg_r = np.mean(stats["episode_rewards"][-50:])
+        if ep % 100 == 0:
+            avg_r = np.mean(stats["episode_rewards"][-100:])
             logger.info(
                 f"Episode {ep}/{total_episodes} | task={task_id} | "
-                f"ε={epsilon:.3f} | avg_reward(50)={avg_r:.2f} | "
+                f"ε={epsilon:.3f} | avg_reward(100)={avg_r:.2f} | "
                 f"best={best_reward:.2f}"
             )
 
     elapsed = time.time() - t_start
-    logger.info(f"Training complete in {elapsed:.1f}s | Best reward: {best_reward:.2f}")
+    logger.info(
+        f"Training complete in {elapsed:.1f}s | Best reward: {best_reward:.2f}"
+    )
 
-    # always save final checkpoint too
+    # always save final checkpoint
     _save_checkpoint(
         policy_net, obs_dim, max_deg,
         save_path or str(CHECKPOINT_DIR / "policy_best.pt"),
@@ -153,6 +183,8 @@ def train(
             "elapsed_seconds": elapsed,
             "best_reward": best_reward,
             "final_epsilon": float(epsilon),
+            "obs_dim": obs_dim,
+            "max_degree": max_deg,
         }, f, indent=2)
 
     return stats
@@ -185,10 +217,10 @@ def load_policy(path: str) -> FluxRouteDQN:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="FluxRoute DQN training")
-    parser.add_argument("--episodes", type=int, default=500)
+    parser.add_argument("--episodes", type=int, default=3000)
     parser.add_argument("--task", type=str, default=None,
                         help="Single task to train on (default: curriculum)")
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save", type=str, default=None)
     args = parser.parse_args()

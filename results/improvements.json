@@ -1,20 +1,130 @@
 {
-  "rl_vs_dijkstra": {
-    "easy_static_mesh": -58.55022483496475,
-    "medium_bursty_dc": -35.96189107380801,
-    "hard_failure_shift": -58.69595056291267,
-    "research_burst": -37.27947366942509
+  "rl_vs_ospf": {
+    "grade": {
+      "easy_static_mesh": 0.0228385105102402,
+      "medium_bursty_dc": -0.057917525353740326,
+      "hard_failure_shift": 0.7332588026122017,
+      "research_burst": 0.06373955942115586
+    },
+    "latency_reduction_pct": {
+      "easy_static_mesh": 1.1753996074720243,
+      "medium_bursty_dc": -5.863103072982941,
+      "hard_failure_shift": 2.7479885242906366,
+      "research_burst": 2.323969484589601
+    },
+    "p95_reduction_pct": {
+      "easy_static_mesh": -1.8731792810709962,
+      "medium_bursty_dc": -3.920468807450017,
+      "hard_failure_shift": 9.007668742058604,
+      "research_burst": 4.293655096268727
+    },
+    "throughput_gain_pct": {
+      "easy_static_mesh": 0.0,
+      "medium_bursty_dc": 0.0,
+      "hard_failure_shift": 11.585365853658537,
+      "research_burst": 0.9271523178807984
+    },
+    "util_std_reduction_pct": {
+      "easy_static_mesh": 0.20125987939947979,
+      "medium_bursty_dc": -7.1621337056528676,
+      "hard_failure_shift": 0.05764993976068847,
+      "research_burst": -9.052104663952248
+    }
   },
   "rl_vs_ecmp": {
-    "easy_static_mesh": -58.55022483496475,
-    "medium_bursty_dc": -35.96189107380801,
-    "hard_failure_shift": -58.69595056291267,
-    "research_burst": -37.27947366942509
+    "grade": {
+      "easy_static_mesh": 0.08436091597883551,
+      "medium_bursty_dc": -0.011058318862258195,
+      "hard_failure_shift": 3.5643650219259073,
+      "research_burst": 0.06607778792769321
+    },
+    "latency_reduction_pct": {
+      "easy_static_mesh": 0.7586694635046937,
+      "medium_bursty_dc": -2.263842542628721,
+      "hard_failure_shift": -7.846262217036353,
+      "research_burst": 2.771860169097496
+    },
+    "p95_reduction_pct": {
+      "easy_static_mesh": 2.8108951146390186,
+      "medium_bursty_dc": 2.927581878148771,
+      "hard_failure_shift": 2.8977972443410587,
+      "research_burst": 8.335712538995223
+    },
+    "throughput_gain_pct": {
+      "easy_static_mesh": 0.0,
+      "medium_bursty_dc": 0.0,
+      "hard_failure_shift": 241.41791044776122,
+      "research_burst": -0.2617801047120456
+    },
+    "util_std_reduction_pct": {
+      "easy_static_mesh": -3.7998412657226726,
+      "medium_bursty_dc": -7.302164243361461,
+      "hard_failure_shift": 0.2695791935349496,
+      "research_burst": -1.073691173353237
+    }
   },
-  "rl_vs_weighted_sp": {
-    "easy_static_mesh": -58.55022483496475,
-    "medium_bursty_dc": -35.96189107380801,
-    "hard_failure_shift": -58.69595056291267,
-    "research_burst": -37.27947366942509
+  "rl_vs_srte": {
+    "grade": {
+      "easy_static_mesh": -1.0549297283613228,
+      "medium_bursty_dc": -0.22107608229297365,
+      "hard_failure_shift": -0.05122423297029119,
+      "research_burst": 0.24809110751106567
+    },
+    "latency_reduction_pct": {
+      "easy_static_mesh": -15.477822994853693,
+      "medium_bursty_dc": -29.443077493594917,
+      "hard_failure_shift": -17.461236508102743,
+      "research_burst": -14.345836679320254
+    },
+    "p95_reduction_pct": {
+      "easy_static_mesh": -30.24197536764027,
+      "medium_bursty_dc": -36.913814293936,
+      "hard_failure_shift": -26.590657371359892,
+      "research_burst": -20.117858781649346
+    },
+    "throughput_gain_pct": {
+      "easy_static_mesh": 0.5347593582887776,
+      "medium_bursty_dc": 0.0,
+      "hard_failure_shift": 11.721611721611714,
+      "research_burst": 12.555391432791726
+    },
+    "util_std_reduction_pct": {
+      "easy_static_mesh": 4.084973562717852,
+      "medium_bursty_dc": 2.514524989986759,
+      "hard_failure_shift": 0.007969197702528645,
+      "research_burst": 5.282950168585994
+    }
+  },
+  "rl_vs_oracle": {
+    "grade": {
+      "easy_static_mesh": -1.0549297283613228,
+      "medium_bursty_dc": -0.22107608229297365,
+      "hard_failure_shift": -0.15720442619328495,
+      "research_burst": 0.2479733362230643
+    },
+    "latency_reduction_pct": {
+      "easy_static_mesh": -15.477822994853693,
+      "medium_bursty_dc": -29.443077493594917,
+      "hard_failure_shift": -17.379262329042298,
+      "research_burst": -14.343630418415751
+    },
+    "p95_reduction_pct": {
+      "easy_static_mesh": -30.24197536764027,
+      "medium_bursty_dc": -36.913814293936,
+      "hard_failure_shift": -27.482261157123794,
+      "research_burst": -20.11797269058692
+    },
+    "throughput_gain_pct": {
+      "easy_static_mesh": 0.5347593582887776,
+      "medium_bursty_dc": 0.0,
+      "hard_failure_shift": 9.318996415770606,
+      "research_burst": 12.555391432791726
+    },
+    "util_std_reduction_pct": {
+      "easy_static_mesh": 4.084973562717852,
+      "medium_bursty_dc": 2.514524989986759,
+      "hard_failure_shift": -0.00040039254374354423,
+      "research_burst": 5.213682034028027
+    }
   }
 }

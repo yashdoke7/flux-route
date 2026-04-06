@@ -31,14 +31,14 @@ class ECMPBaseline:
         dst = obs.destination_node
         nbrs = network.neighbors(src)
 
-        # find all shortest paths
+        # find all equal-hop shortest paths (true ECMP behavior)
         try:
             G_weighted = nx.Graph()
             for (u, v), ls in network.link_states.items():
                 if not ls.failed and u < v:
-                    G_weighted.add_edge(u, v, weight=ls.base_latency_ms)
+                    G_weighted.add_edge(u, v)
             all_paths = list(
-                nx.all_shortest_paths(G_weighted, source=src, target=dst, weight="weight")
+                nx.all_shortest_paths(G_weighted, source=src, target=dst)
             )
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return self._fallback(obs)

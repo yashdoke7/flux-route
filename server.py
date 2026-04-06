@@ -49,9 +49,18 @@ class ResetRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@app.get("/")
+def root():
+    return {
+        "message": "FluxRoute OpenEnv API is running",
+        "version": "1.1.0",
+        "documentation": "/docs"
+    }
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "environment": "FluxRoute", "version": "1.0.0"}
+    return {"status": "ok", "environment": "FluxRoute", "version": "1.1.0"}
 
 
 @app.post("/reset", response_model=Observation)

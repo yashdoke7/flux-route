@@ -32,6 +32,7 @@ def relative_improvement(
     agent: str = "rl_dqn",
     baseline: str = "dijkstra",
     metric: str = "grade",
+    lower_is_better: bool = False,
 ) -> Dict[str, float]:
     """Compute relative improvement of agent vs baseline per task."""
     improvements: Dict[str, float] = {}
@@ -42,8 +43,11 @@ def relative_improvement(
             continue
         bl_mean = bl_vals.mean()
         ag_mean = ag_vals.mean()
-        if bl_mean != 0:
-            improvements[task_id] = (ag_mean - bl_mean) / abs(bl_mean) * 100
+        denom = max(abs(bl_mean), 1e-9)
+        if lower_is_better:
+            # Positive means RL reduced the metric (improvement).
+            improvements[task_id] = (bl_mean - ag_mean) / denom * 100
         else:
-            improvements[task_id] = 0.0
+            # Positive means RL increased the metric (improvement).
+            improvements[task_id] = (ag_mean - bl_mean) / denom * 100
     return improvements

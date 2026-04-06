@@ -50,8 +50,9 @@ def plot_score_comparison(
     if df is None:
         df = _load_results()
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5), sharey=True)
     tasks = sorted(df["task_id"].unique())
+    fig, axes = plt.subplots(1, len(tasks), figsize=(5 * len(tasks), 5), sharey=True)
+    axes = np.atleast_1d(axes)
 
     for ax, task in zip(axes, tasks):
         sub = df[df["task_id"] == task]
@@ -87,8 +88,9 @@ def plot_latency_over_time(
     if df is None:
         df = _load_results()
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
     tasks = sorted(df["task_id"].unique())
+    fig, axes = plt.subplots(1, len(tasks), figsize=(5 * len(tasks), 5))
+    axes = np.atleast_1d(axes)
 
     for ax, task in zip(axes, tasks):
         sub = df[df["task_id"] == task]
@@ -121,8 +123,9 @@ def plot_latency_cdf(
     if df is None:
         df = _load_results()
 
-    fig, axes = plt.subplots(1, 3, figsize=(16, 5))
     tasks = sorted(df["task_id"].unique())
+    fig, axes = plt.subplots(1, len(tasks), figsize=(5 * len(tasks), 5))
+    axes = np.atleast_1d(axes)
     palette = sns.color_palette("Set2", 6)
 
     for ax, task in zip(axes, tasks):

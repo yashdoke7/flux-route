@@ -29,7 +29,9 @@ class Observation(BaseModel):
     current_node: int = Field(..., ge=0)
     destination_node: int = Field(..., ge=0)
     packet_priority: float = Field(..., ge=0.0, le=1.0)
-    current_hops_to_dest: float = Field(0.0, description="Progress sensing: current node distance to destination")
+    packet_accumulated_latency_ms: float = Field(0.0, ge=0.0, description="Accumulated latency so far (from packet timestamp)")
+    packet_hops_taken: int = Field(0, ge=0, description="Hops taken so far (from TTL: original_TTL - current_TTL)")
+    current_hops_to_dest: float = Field(0.0, description="Progress sensing: current node distance to destination (from RIB)")
 
     # Local neighbourhood (padded to max_degree)
     local_neighbor_ids: List[int] = Field(

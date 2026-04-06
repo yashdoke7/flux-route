@@ -1,40 +1,56 @@
 environment:
   name: FluxRoute
-  version: "1.0.0"
+  version: "1.1.0"
   description: >
-    Constrained-inference RL environment for adaptive network routing in
-    CDN / data-center-like topologies.  A lightweight DQN policy selects
-    next-hop routing decisions to minimise latency and balance link
-    utilisation, all under strict 2-vCPU / 8 GB RAM CPU-only limits.
+    An industry-grade Reinforcement Learning environment for adaptive network 
+    routing, modeling M/M/1 queuing theory, OSPF link-state convergence, 
+    and real-world Router ASIC telemetry (SNMP/BFD/INT).
   author: FluxRoute Team
   license: MIT
+  tags: [networking, routing, rl, gnn, openenv]
 
 tasks:
   - id: easy_static_mesh
-    description: "Small 4×4 mesh with stationary moderate traffic. Focus: reduce mean latency."
+    description: "4x4 Grid with steady traffic. Objective: Minimize end-to-end latency."
     difficulty: easy
   - id: medium_bursty_dc
-    description: "3-tier data-center topology with bursty hotspot traffic. Focus: load balance + low packet loss."
+    description: "3-Tier Clos topology with micro-burst hotspots. Objective: Load balance across links."
     difficulty: medium
   - id: hard_failure_shift
-    description: "Medium graph with mixed priorities and sudden link failures. Focus: resilience under disruption."
+    description: "Multi-path graph with sudden 50ms link failures. Objective: Rapid OSPF-aware detour selection."
     difficulty: hard
+  - id: research_burst
+    description: "Heavy-load research topology. Objective: Test boundary of M/M/1 queue stability."
+    difficulty: research
 
-endpoints:
-  reset: /reset
-  step: /step
-  state: /state
-  health: /health
+action_space:
+  type: discrete
+  shape: [8]
+  description: >
+    Selection of the next-hop index (0-7) for the current packet. 
+    Indices map to local physical ports on the router. 
+    Action masking is used to filter out dead or disconnected links.
+
+observation_space:
+  type: box
+  shape: [62]
+  description: >
+    62-dimensional vector of real-world telemetry:
+    - [0-55]: 7 features per neighbor (queue depth, trend, utilization, BFD latency, 
+      status mask, neighbor-avg-util, hops-to-dest).
+    - [56-61]: Global packet metadata (DSCP priority, accumulated latency, 
+      TTL/hops taken, distance-to-dest, mesh-avg-utilization).
 
 inference:
   script: inference.py
   max_runtime_minutes: 20
-  target_runtime_minutes: 12
+  target_runtime_minutes: 10
+  vcpu: 2
+  memory_gb: 8
 
 resources:
   max_vcpu: 2
   max_ram_gb: 8
-  target_ram_gb: 4
   gpu_required: false
 
 docker:

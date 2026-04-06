@@ -25,28 +25,37 @@ from environment.models import EpisodeMetrics
 from environment.tasks.task_bank import get_task
 
 
-# Reference ranges per task (worst, best) – calibrated against baselines
+# Reference ranges per task (worst, best).
+# Calibrated for M/M/1 queuing model: delays are higher under congestion
+# than with the previous ad-hoc formula (delay ∝ ρ/(1-ρ) → explodes near ρ=1).
 _REF_RANGES: Dict[str, Dict[str, tuple]] = {
     "easy_static_mesh": {
-        "latency": (20.0, 1.0),       # worst mean lat, best mean lat
-        "tail":    (50.0, 3.0),        # worst p95, best p95
-        "max_loss": 0.3,               # type: ignore
-        "max_throughput": 500,          # type: ignore
-        "max_std": 0.4,                # type: ignore
+        "latency": (40.0, 1.0),       # worst mean lat, best mean lat
+        "tail":    (100.0, 3.0),       # worst p95, best p95
+        "max_loss": 0.3,
+        "max_throughput": 500,
+        "max_std": 0.4,
     },
     "medium_bursty_dc": {
-        "latency": (35.0, 1.5),
-        "tail":    (80.0, 5.0),
+        "latency": (60.0, 0.5),
+        "tail":    (150.0, 2.0),
         "max_loss": 0.4,
         "max_throughput": 800,
         "max_std": 0.45,
     },
     "hard_failure_shift": {
-        "latency": (50.0, 2.0),
-        "tail":    (120.0, 8.0),
+        "latency": (80.0, 1.0),
+        "tail":    (200.0, 5.0),
         "max_loss": 0.5,
         "max_throughput": 700,
         "max_std": 0.5,
+    },
+    "research_burst": {
+        "latency": (100.0, 1.0),
+        "tail":    (250.0, 5.0),
+        "max_loss": 0.6,
+        "max_throughput": 700,
+        "max_std": 0.55,
     },
 }
 
