@@ -1,8 +1,9 @@
 {
-  "total_episodes": 10,
-  "elapsed_seconds": 19.256314754486084,
-  "best_reward": 9.999079158320802,
-  "final_epsilon": 0.9893723923806714,
+  "total_episodes": 5,
+  "elapsed_seconds": 11.10968804359436,
+  "best_reward": -73.83958503209907,
+  "best_grade": 0.7931431801938466,
+  "final_epsilon": 0.9952618552330482,
   "obs_dim": 62,
   "max_degree": 8
 }

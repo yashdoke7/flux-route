@@ -8,3 +8,4 @@ dist/
 build/
 .mypy_cache/
 .pytest_cache/
+agent/debug_log.txt

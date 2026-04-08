@@ -13,15 +13,55 @@ tasks:
   - id: easy_static_mesh
     description: "4x4 Grid with steady traffic. Objective: Minimize end-to-end latency."
     difficulty: easy
+    grader:
+      type: deterministic
+      method: weighted_metrics
+      score_range: [0.0, 1.0]
+      metrics:
+        - latency_score
+        - tail_score
+        - loss_score
+        - balance_score
+        - throughput_score
   - id: medium_bursty_dc
     description: "3-Tier Clos topology with micro-burst hotspots. Objective: Load balance across links."
     difficulty: medium
+    grader:
+      type: deterministic
+      method: weighted_metrics
+      score_range: [0.0, 1.0]
+      metrics:
+        - latency_score
+        - tail_score
+        - loss_score
+        - balance_score
+        - throughput_score
   - id: hard_failure_shift
     description: "Multi-path graph with sudden 50ms link failures. Objective: Rapid OSPF-aware detour selection."
     difficulty: hard
+    grader:
+      type: deterministic
+      method: weighted_metrics
+      score_range: [0.0, 1.0]
+      metrics:
+        - latency_score
+        - tail_score
+        - loss_score
+        - balance_score
+        - throughput_score
   - id: research_burst
     description: "Heavy-load research topology. Objective: Test boundary of M/M/1 queue stability."
     difficulty: research
+    grader:
+      type: deterministic
+      method: weighted_metrics
+      score_range: [0.0, 1.0]
+      metrics:
+        - latency_score
+        - tail_score
+        - loss_score
+        - balance_score
+        - throughput_score
 
 action_space:
   type: discrete

@@ -52,10 +52,29 @@ We evaluate against 4 distinct industry-standard regimes:
 # Install dependencies
 pip install -r requirements.txt
 
-# Run the mandatory LLM-Orchestrated inference benchmark
+# Required variables for hackathon inference.py
+export API_BASE_URL="https://router.huggingface.co/v1"
+export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
 export HF_TOKEN="your_token"
+export POLICY_CKPT="agent/checkpoints/policy_mastery_final.pt"
+
+# Run mandatory hybrid RL+LLM inference benchmark
 python inference.py
 ```
+
+### Local LLM (OpenAI-compatible)
+If you do not want paid hosted API calls, run a local OpenAI-compatible server
+(for example vLLM, LM Studio, or an Ollama OpenAI bridge) and set:
+
+```bash
+export API_BASE_URL="http://localhost:8000/v1"
+export MODEL_NAME="your-local-model"
+export HF_TOKEN="local-dev-key"
+export POLICY_CKPT="agent/checkpoints/policy_mastery_final.pt"
+python inference.py
+```
+
+The script still uses the OpenAI client, satisfying the hackathon contract.
 
 ### Docker Deployment (HF Spaces)
 FluxRoute is built to run on **2-vCPU / 8GB RAM** CPU-only environments.

@@ -29,7 +29,9 @@ import torch.optim as optim
 
 from agent.policy import FluxRouteDQN, ReplayBuffer
 from environment.env import RoutingEnv
+from environment.graders.grader import grade_episode
 from environment.models import Action
+from environment.reward import RewardCoefficients
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("fluxroute.train")
@@ -51,6 +53,10 @@ def train(
     tau: float = 0.005,
     seed: int = 42,
     save_path: str | None = None,
+    task_weights: dict[str, float] | None = None,
+    patience: int = 600,
+    min_improve: float = 1e-3,
+    reward_coeffs: RewardCoefficients | None = None,
 ) -> dict:
     """Train Double-DQN and return training stats.
 
@@ -61,9 +67,14 @@ def train(
         eps_decay_episodes:  Exponential decay constant for ε-greedy.
     """
     if task_ids is None:
-        task_ids = ["easy_static_mesh", "medium_bursty_dc", "hard_failure_shift"]
+        task_ids = [
+            "easy_static_mesh",
+            "medium_bursty_dc",
+            "hard_failure_shift",
+            "research_burst",
+        ]
 
-    env = RoutingEnv()
+    env = RoutingEnv(reward_coeffs=reward_coeffs)
     obs = env.reset(task_ids[0], seed=seed)
     obs_dim = env.observation_size
     max_deg = env.max_degree
@@ -81,10 +92,25 @@ def train(
 
     t_start = time.time()
     best_reward = -float("inf")
+    best_grade = -float("inf")
+    last_improve_ep = 0
+
+    if task_weights is None:
+        task_weights = {
+            "easy_static_mesh": 0.8,
+            "medium_bursty_dc": 1.0,
+            "hard_failure_shift": 1.6,
+            "research_burst": 1.6,
+        }
+    sampled_weights = np.array(
+        [max(task_weights.get(t, 1.0), 1e-6) for t in task_ids],
+        dtype=np.float64,
+    )
+    sampled_weights = sampled_weights / sampled_weights.sum()
 
     for ep in range(total_episodes):
-        # curriculum: cycle through tasks
-        task_id = task_ids[ep % len(task_ids)]
+        # Weighted curriculum: bias toward harder tasks while preserving coverage.
+        task_id = str(rng.choice(task_ids, p=sampled_weights))
         ep_seed = int(rng.integers(0, 2**31))
         obs = env.reset(task_id, seed=ep_seed)
 
@@ -148,25 +174,43 @@ def train(
 
         stats["episode_rewards"].append(ep_reward)
 
-        # save best
-        if ep_reward > best_reward:
-            best_reward = ep_reward
+        ep_grade = grade_episode(env.episode_metrics, task_id)
+        stats["episode_grades"].append(ep_grade)
+
+        # save best by grade because submission quality is judged by the grader,
+        # not raw environment reward.
+        if ep_grade > (best_grade + min_improve):
+            best_grade = ep_grade
+            last_improve_ep = ep
             _save_checkpoint(
                 policy_net, obs_dim, max_deg,
                 save_path or str(CHECKPOINT_DIR / "policy_best.pt"),
             )
 
+        # Keep reward-based tracking for debugging only.
+        if ep_reward > best_reward:
+            best_reward = ep_reward
+
         if ep % 100 == 0:
             avg_r = np.mean(stats["episode_rewards"][-100:])
+            avg_g = np.mean(stats["episode_grades"][-100:])
             logger.info(
                 f"Episode {ep}/{total_episodes} | task={task_id} | "
                 f"ε={epsilon:.3f} | avg_reward(100)={avg_r:.2f} | "
-                f"best={best_reward:.2f}"
+                f"avg_grade(100)={avg_g:.3f} | best_grade={best_grade:.3f} | "
+                f"best_reward={best_reward:.2f}"
             )
+
+        if ep > 0 and ep - last_improve_ep >= patience:
+            logger.info(
+                f"Early stopping at episode {ep}: no grade improvement >= {min_improve}"
+                f" for {patience} episodes."
+            )
+            break
 
     elapsed = time.time() - t_start
     logger.info(
-        f"Training complete in {elapsed:.1f}s | Best reward: {best_reward:.2f}"
+        f"Training complete in {elapsed:.1f}s | Best reward: {best_reward:.2f} | Best grade: {best_grade:.3f}"
     )
 
     # always save final checkpoint
@@ -182,6 +226,7 @@ def train(
             "total_episodes": total_episodes,
             "elapsed_seconds": elapsed,
             "best_reward": best_reward,
+            "best_grade": best_grade,
             "final_epsilon": float(epsilon),
             "obs_dim": obs_dim,
             "max_degree": max_deg,
@@ -223,15 +268,45 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=5e-4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--save", type=str, default=None)
+    parser.add_argument("--patience", type=int, default=600,
+                        help="Early stop patience (episodes without best-grade improvement).")
+    parser.add_argument("--delivery-bonus", type=float, default=4.0)
+    parser.add_argument("--latency-cost", type=float, default=1.5)
+    parser.add_argument("--drop-penalty", type=float, default=4.0)
+    parser.add_argument("--congestion-cost", type=float, default=1.2)
+    parser.add_argument("--w-easy", type=float, default=0.8,
+                        help="Curriculum sampling weight for easy_static_mesh.")
+    parser.add_argument("--w-medium", type=float, default=1.0,
+                        help="Curriculum sampling weight for medium_bursty_dc.")
+    parser.add_argument("--w-hard", type=float, default=1.6,
+                        help="Curriculum sampling weight for hard_failure_shift.")
+    parser.add_argument("--w-research", type=float, default=1.6,
+                        help="Curriculum sampling weight for research_burst.")
     args = parser.parse_args()
 
     tasks = [args.task] if args.task else None
+    reward_coeffs = RewardCoefficients(
+        delivery_bonus=args.delivery_bonus,
+        latency_cost=args.latency_cost,
+        drop_penalty=args.drop_penalty,
+        congestion_cost=args.congestion_cost,
+    )
+    task_weights = {
+        "easy_static_mesh": args.w_easy,
+        "medium_bursty_dc": args.w_medium,
+        "hard_failure_shift": args.w_hard,
+        "research_burst": args.w_research,
+    }
+
     train(
         task_ids=tasks,
         total_episodes=args.episodes,
         lr=args.lr,
         seed=args.seed,
         save_path=args.save,
+        patience=args.patience,
+        task_weights=task_weights,
+        reward_coeffs=reward_coeffs,
     )
 
 

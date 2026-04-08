@@ -1,0 +1,35 @@
+2026-04-08 10:29:43,755 Initializing FluxRoute Hybrid Inference...
+2026-04-08 10:29:44,010 Loaded GNN policy checkpoint: C:\Users\ASUS\Desktop\CS\Projects\flux-route\agent\checkpoints\policy_retrain_3000_v10_maskfix.pt
+2026-04-08 10:29:44,472 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:44,483 Task=easy_static_mesh seed=42 mode=sr_te
+2026-04-08 10:29:44,944 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:44,945 Task=easy_static_mesh seed=123 mode=sr_te
+2026-04-08 10:29:45,342 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:45,342 Task=easy_static_mesh seed=777 mode=sr_te
+2026-04-08 10:29:45,724 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:45,725 Task=medium_bursty_dc seed=42 mode=rl_balanced
+2026-04-08 10:29:46,486 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:46,486 Task=medium_bursty_dc seed=123 mode=sr_te
+2026-04-08 10:29:47,012 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:47,012 Task=medium_bursty_dc seed=777 mode=rl_balanced
+2026-04-08 10:29:47,899 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:47,899 Task=hard_failure_shift seed=42 mode=sr_te
+2026-04-08 10:29:48,389 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:48,389 Task=hard_failure_shift seed=123 mode=sr_te
+2026-04-08 10:29:48,973 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:48,973 Task=hard_failure_shift seed=777 mode=sr_te
+2026-04-08 10:29:49,519 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:49,520 Task=research_burst seed=42 mode=rl_balanced
+2026-04-08 10:29:50,693 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:50,693 Task=research_burst seed=123 mode=rl_balanced
+2026-04-08 10:29:51,617 HTTP Request: POST http://127.0.0.1:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-04-08 10:29:51,617 Task=research_burst seed=777 mode=rl_balanced
+Traceback (most recent call last):
+  File "C:\Users\ASUS\Desktop\CS\Projects\flux-route\inference.py", line 319, in <module>
+    main()
+  File "C:\Users\ASUS\Desktop\CS\Projects\flux-route\inference.py", line 314, in main
+    print("\n" + report_md)
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f3c6' in position 1330: character maps to <undefined>
