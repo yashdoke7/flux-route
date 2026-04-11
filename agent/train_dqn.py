@@ -57,6 +57,10 @@ def train(
     patience: int = 600,
     min_improve: float = 1e-3,
     reward_coeffs: RewardCoefficients | None = None,
+    per_alpha: float = 0.6,
+    per_beta_start: float = 0.4,
+    curriculum_focus: float = 1.5,
+    curriculum_refresh: int = 50,
 ) -> dict:
     """Train Double-DQN and return training stats.
 
@@ -85,15 +89,24 @@ def train(
     target_net.eval()
 
     optimizer = optim.Adam(policy_net.parameters(), lr=lr)
-    replay = ReplayBuffer(buffer_capacity)
+    replay = ReplayBuffer(
+        buffer_capacity,
+        prioritized_alpha=per_alpha,
+    )
 
     rng = np.random.default_rng(seed)
-    stats = {"episode_rewards": [], "episode_grades": [], "losses": []}
+    stats = {
+        "episode_rewards": [],
+        "episode_grades": [],
+        "losses": [],
+        "task_ids": [],
+    }
 
     t_start = time.time()
     best_reward = -float("inf")
     best_grade = -float("inf")
     last_improve_ep = 0
+    beta = float(per_beta_start)
 
     if task_weights is None:
         task_weights = {
@@ -107,6 +120,25 @@ def train(
         dtype=np.float64,
     )
     sampled_weights = sampled_weights / sampled_weights.sum()
+    task_grade_ema = {t: 0.0 for t in task_ids}
+
+    def _refresh_task_weights() -> np.ndarray:
+        base = np.array(
+            [max(task_weights.get(t, 1.0), 1e-6) for t in task_ids],
+            dtype=np.float64,
+        )
+        if len(task_ids) <= 1:
+            return np.array([1.0], dtype=np.float64)
+
+        ema_vals = np.array([task_grade_ema[t] for t in task_ids], dtype=np.float64)
+        max_ema = float(np.max(ema_vals))
+        underperformance = np.maximum(max_ema - ema_vals, 0.0)
+        adaptive = 1.0 + max(curriculum_focus, 0.0) * underperformance
+        weights = base * adaptive
+        s = float(weights.sum())
+        if s <= 0.0:
+            return np.full(len(task_ids), 1.0 / len(task_ids), dtype=np.float64)
+        return weights / s
 
     for ep in range(total_episodes):
         # Weighted curriculum: bias toward harder tasks while preserving coverage.
@@ -122,6 +154,7 @@ def train(
         ep_reward = 0.0
         obs_vec = env.obs_to_flat(obs)
         mask = obs.action_mask
+        beta = min(1.0, per_beta_start + (1.0 - per_beta_start) * (ep / max(total_episodes - 1, 1)))
 
         while not env.is_done:
             action_idx = policy_net.select_action(obs_vec, mask, epsilon)
@@ -141,7 +174,7 @@ def train(
 
             # train step
             if len(replay) >= batch_size:
-                s, a, r, ns, d, m, nm = replay.sample(batch_size)
+                s, a, r, ns, d, m, nm, idxs, isw = replay.sample(batch_size, beta=beta)
 
                 # Current Q-values
                 q_vals = policy_net(s, m).gather(1, a.unsqueeze(1)).squeeze(1)
@@ -156,13 +189,16 @@ def train(
                     ).squeeze(1)
                     target = r + gamma * next_q * (1 - d)
 
-                loss = F.smooth_l1_loss(q_vals, target)
+                td_errors = q_vals - target
+                per_item_loss = F.smooth_l1_loss(q_vals, target, reduction="none")
+                weighted_loss = (isw * per_item_loss).mean()
                 optimizer.zero_grad()
-                loss.backward()
+                weighted_loss.backward()
                 torch.nn.utils.clip_grad_norm_(policy_net.parameters(), 1.0)
                 optimizer.step()
 
-                stats["losses"].append(float(loss.item()))
+                stats["losses"].append(float(weighted_loss.item()))
+                replay.update_priorities(idxs, td_errors.detach().abs() + 1e-6)
 
                 # Soft target update (Polyak averaging)
                 # θ_target ← τ·θ_policy + (1-τ)·θ_target
@@ -176,6 +212,16 @@ def train(
 
         ep_grade = grade_episode(env.episode_metrics, task_id)
         stats["episode_grades"].append(ep_grade)
+        stats["task_ids"].append(task_id)
+        task_grade_ema[task_id] = 0.9 * task_grade_ema[task_id] + 0.1 * ep_grade
+
+        if (ep + 1) % max(curriculum_refresh, 1) == 0:
+            sampled_weights = _refresh_task_weights()
+            logger.info(
+                "Adaptive curriculum weights: " + ", ".join(
+                    f"{t}={w:.3f}" for t, w in zip(task_ids, sampled_weights)
+                )
+            )
 
         # save best by grade because submission quality is judged by the grader,
         # not raw environment reward.
@@ -196,7 +242,7 @@ def train(
             avg_g = np.mean(stats["episode_grades"][-100:])
             logger.info(
                 f"Episode {ep}/{total_episodes} | task={task_id} | "
-                f"ε={epsilon:.3f} | avg_reward(100)={avg_r:.2f} | "
+                f"ε={epsilon:.3f} | β={beta:.3f} | avg_reward(100)={avg_r:.2f} | "
                 f"avg_grade(100)={avg_g:.3f} | best_grade={best_grade:.3f} | "
                 f"best_reward={best_reward:.2f}"
             )
@@ -222,14 +268,29 @@ def train(
     # save stats
     stats_path = CHECKPOINT_DIR / "train_stats.json"
     with open(stats_path, "w") as f:
+        task_grade_mean = {}
+        for t in task_ids:
+            task_grades = [
+                g for g, tid in zip(stats["episode_grades"], stats["task_ids"])
+                if tid == t
+            ]
+            task_grade_mean[t] = float(np.mean(task_grades)) if task_grades else 0.0
+
         json.dump({
             "total_episodes": total_episodes,
             "elapsed_seconds": elapsed,
             "best_reward": best_reward,
             "best_grade": best_grade,
             "final_epsilon": float(epsilon),
+            "final_beta": float(beta),
             "obs_dim": obs_dim,
             "max_degree": max_deg,
+            "per_alpha": per_alpha,
+            "per_beta_start": per_beta_start,
+            "curriculum_focus": curriculum_focus,
+            "curriculum_refresh": curriculum_refresh,
+            "task_grade_ema": task_grade_ema,
+            "task_grade_mean": task_grade_mean,
         }, f, indent=2)
 
     return stats
@@ -282,6 +343,16 @@ def main() -> None:
                         help="Curriculum sampling weight for hard_failure_shift.")
     parser.add_argument("--w-research", type=float, default=1.6,
                         help="Curriculum sampling weight for research_burst.")
+    parser.add_argument("--per-alpha", type=float, default=0.6,
+                        help="Prioritized replay alpha (0 disables PER).")
+    parser.add_argument("--per-beta-start", type=float, default=0.4,
+                        help="Initial PER importance-sampling beta.")
+    parser.add_argument("--curriculum-focus", type=float, default=1.5,
+                        help="How strongly to upweight underperforming tasks.")
+    parser.add_argument("--curriculum-refresh", type=int, default=50,
+                        help="Episodes between adaptive curriculum updates.")
+    parser.add_argument("--progress-bonus", type=float, default=0.35)
+    parser.add_argument("--lookahead-congestion-cost", type=float, default=0.25)
     args = parser.parse_args()
 
     tasks = [args.task] if args.task else None
@@ -290,6 +361,8 @@ def main() -> None:
         latency_cost=args.latency_cost,
         drop_penalty=args.drop_penalty,
         congestion_cost=args.congestion_cost,
+        progress_bonus=args.progress_bonus,
+        lookahead_congestion_cost=args.lookahead_congestion_cost,
     )
     task_weights = {
         "easy_static_mesh": args.w_easy,
@@ -307,6 +380,10 @@ def main() -> None:
         patience=args.patience,
         task_weights=task_weights,
         reward_coeffs=reward_coeffs,
+        per_alpha=args.per_alpha,
+        per_beta_start=args.per_beta_start,
+        curriculum_focus=args.curriculum_focus,
+        curriculum_refresh=args.curriculum_refresh,
     )
 
 

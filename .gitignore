@@ -9,3 +9,11 @@ build/
 .mypy_cache/
 .pytest_cache/
 agent/debug_log.txt
+
+# Submission hygiene: keep generated artifacts and local helper scaffolding out of git.
+artifacts/
+experiments/
+scripts/
+docs/architecture.md
+docs/next_steps.md
+agent/checkpoints/policy_retrain_*.pt

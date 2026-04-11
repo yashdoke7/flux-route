@@ -41,7 +41,7 @@ POLICY_CKPT = os.getenv("POLICY_CKPT", "agent/checkpoints/policy_mastery_final.p
 TASK_NAME = os.getenv("FLUXROUTE_TASK")
 BENCHMARK = os.getenv("FLUXROUTE_BENCHMARK", "fluxroute")
 SEED = int(os.getenv("FLUXROUTE_SEED", "42"))
-ORCH_POLICY = os.getenv("FLUXROUTE_ORCH_POLICY", "llm").strip().lower()
+ORCH_POLICY = os.getenv("FLUXROUTE_ORCH_POLICY", "gated").strip().lower()
 
 logging.basicConfig(
     level=logging.CRITICAL,
@@ -69,7 +69,7 @@ def _stress_snapshot(obs) -> dict:
 
 
 def _gate_mode(task_id: str, obs, llm_mode: str) -> str:
-    """Keep LLM strategy selection, but prevent constant SR-TE fallback in low-stress regimes."""
+    """Constrain mode selection with task-aware safety rails."""
     s = _stress_snapshot(obs)
     severe_stress = (
         s["drop_rate"] >= 0.02
@@ -81,6 +81,17 @@ def _gate_mode(task_id: str, obs, llm_mode: str) -> str:
         or s["util_mean"] >= 0.65
         or s["p95_ms"] >= 10.0
     )
+
+    # Burst-heavy tasks are sensitive to bad tactical picks.
+    if task_id == "research_burst":
+        if s["drop_rate"] >= 0.001 or s["util_mean"] >= 0.58 or s["p95_ms"] >= 12.0:
+            return "sr_te"
+        if llm_mode == "rl_aggressive":
+            return "rl_balanced"
+
+    if task_id == "medium_bursty_dc":
+        if s["drop_rate"] >= 0.005 or s["util_mean"] >= 0.62 or s["p95_ms"] >= 9.0:
+            return "sr_te"
 
     # Optional safety-only gate: do not force RL unless operator asks for it.
     if task_id in {"hard_failure_shift", "research_burst"} and llm_mode == "ospf" and severe_stress:
@@ -192,9 +203,9 @@ def _orchestrate_mode(client: OpenAI, task_id: str, obs) -> str:
         data = json.loads(raw)
         mode = str(data.get("mode", "rl_balanced")).strip().lower()
         if mode in {"rl_balanced", "rl_aggressive", "sr_te", "ospf"}:
-            if ORCH_POLICY == "gated":
-                return _gate_mode(task_id, obs, mode)
-            return mode
+            if ORCH_POLICY == "llm_raw":
+                return mode
+            return _gate_mode(task_id, obs, mode)
     except Exception:
         pass
 

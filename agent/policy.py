@@ -228,12 +228,21 @@ FluxRouteDQN = FluxRouteGNN
 
 
 class ReplayBuffer:
-    """Simple circular replay buffer."""
+    """Circular replay buffer with optional prioritized sampling."""
 
-    def __init__(self, capacity: int = 100000):
+    def __init__(
+        self,
+        capacity: int = 100000,
+        prioritized_alpha: float = 0.0,
+        priority_epsilon: float = 1e-6,
+    ):
         self.capacity = capacity
         self._buffer: List = []
         self._pos = 0
+        self._alpha = max(0.0, float(prioritized_alpha))
+        self._priority_eps = float(priority_epsilon)
+        self._max_priority = 1.0
+        self._priorities = np.zeros(capacity, dtype=np.float32)
 
     def push(self, obs, action, reward, next_obs, done, mask, next_mask) -> None:
         entry = (obs, action, reward, next_obs, done, mask, next_mask)
@@ -241,10 +250,43 @@ class ReplayBuffer:
             self._buffer.append(entry)
         else:
             self._buffer[self._pos] = entry
+        self._priorities[self._pos] = self._max_priority
         self._pos = (self._pos + 1) % self.capacity
 
-    def sample(self, batch_size: int):
-        indices = np.random.choice(len(self._buffer), batch_size, replace=False)
+    def sample(self, batch_size: int, beta: float = 1.0):
+        n = len(self._buffer)
+        if n == 0:
+            raise ValueError("Cannot sample from an empty replay buffer.")
+
+        if self._alpha > 0.0:
+            priorities = self._priorities[:n].astype(np.float64, copy=True)
+            priorities = np.where(np.isfinite(priorities), priorities, self._max_priority)
+            priorities = np.maximum(priorities, self._priority_eps)
+
+            scaled = np.power(priorities, self._alpha)
+            scaled = np.where(np.isfinite(scaled), scaled, 0.0)
+            prob_sum = float(np.sum(scaled, dtype=np.float64))
+            if prob_sum <= 0.0 or not np.isfinite(prob_sum):
+                probs = np.full(n, 1.0 / n, dtype=np.float64)
+            else:
+                probs = scaled / prob_sum
+                probs = np.clip(probs, 0.0, 1.0)
+                probs_sum = float(np.sum(probs, dtype=np.float64))
+                if probs_sum <= 0.0 or not np.isfinite(probs_sum):
+                    probs = np.full(n, 1.0 / n, dtype=np.float64)
+                else:
+                    probs = probs / probs_sum
+                    # Avoid tiny floating drift that can trigger np.random.choice checks.
+                    probs[-1] += 1.0 - float(np.sum(probs, dtype=np.float64))
+
+            indices = np.random.choice(n, batch_size, replace=False, p=probs)
+            weights = np.power(n * probs[indices], -beta)
+            weights = weights / max(float(weights.max()), 1e-8)
+            is_weights = torch.tensor(weights, dtype=torch.float32)
+        else:
+            indices = np.random.choice(n, batch_size, replace=False)
+            is_weights = torch.ones(batch_size, dtype=torch.float32)
+
         batch = [self._buffer[i] for i in indices]
         obs, act, rew, nobs, done, mask, nmask = zip(*batch)
         
@@ -287,7 +329,20 @@ class ReplayBuffer:
             done_stacked,
             torch.tensor(mask_stacked, dtype=torch.float32),
             torch.tensor(nmask_stacked, dtype=torch.float32),
+            torch.tensor(indices, dtype=torch.long),
+            is_weights,
         )
+
+    def update_priorities(self, indices: torch.Tensor, priorities: torch.Tensor) -> None:
+        if self._alpha <= 0.0:
+            return
+        idx_np = indices.detach().cpu().numpy().astype(np.int64)
+        pri_np = priorities.detach().cpu().numpy().astype(np.float32)
+        pri_np = np.where(np.isfinite(pri_np), pri_np, self._max_priority).astype(np.float32)
+        pri_np = np.maximum(pri_np, self._priority_eps)
+        self._priorities[idx_np] = pri_np
+        if pri_np.size > 0:
+            self._max_priority = max(self._max_priority, float(np.max(pri_np)))
 
     def __len__(self) -> int:
         return len(self._buffer)

@@ -145,9 +145,15 @@ class RoutingEnv:
         loop_drop = False
         invalid = False
         delivered = False
+        distance_before = 0.0
+        distance_after = 0.0
+        next_hop_lookahead_util = 0.0
 
         if self._current_packet is not None:
             pkt = self._current_packet
+            distance_before = float(
+                self._network.get_distance(pkt.source, pkt.destination)
+            )
             nbrs = self._network.neighbors(pkt.source)
             max_deg = self.max_degree
 
@@ -187,6 +193,15 @@ class RoutingEnv:
                         pkt.accumulated_latency_ms += hop_latency
                         pkt.hops += 1
                         pkt.source = next_node  # advance packet
+                        distance_after = float(
+                            self._network.get_distance(next_node, pkt.destination)
+                        )
+                        next_neighbors = self._network.neighbors(next_node)
+                        if next_neighbors:
+                            next_hop_lookahead_util = float(np.mean([
+                                self._network.get_link(next_node, nn).utilization
+                                for nn in next_neighbors
+                            ]))
 
                         if next_node == pkt.destination:
                             delivered = True
@@ -220,6 +235,9 @@ class RoutingEnv:
             loop_drop=loop_drop,
             invalid=invalid,
             delivered=delivered,
+            distance_before=distance_before,
+            distance_after=distance_after,
+            next_hop_utilization=next_hop_lookahead_util,
         )
         self._metrics.step_rewards.append(reward)
 

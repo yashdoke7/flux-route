@@ -1,7 +1,7 @@
 """
 FluxRoute – Reward calculation logic.
 
-Simplified 4-term dense reward with clear, non-conflicting gradients.
+Dense 6-term reward with clear, non-conflicting gradients.
 
 Design rationale:
 - Each term optimizes a distinct, measurable network KPI.
@@ -33,12 +33,14 @@ class RewardCoefficients:
     latency_cost: float = 1.0
     drop_penalty: float = 3.0
     congestion_cost: float = 0.5
+    progress_bonus: float = 0.35
+    lookahead_congestion_cost: float = 0.25
 
 
 class RewardCalculator:
     """Computes dense reward per-step.
 
-    Why 4 terms and not 10:
+    Why these terms:
     - delivery_bonus: Only reward. Gives clear sparse gradient toward goal.
     - latency_cost:   Normalized per-hop delay. Agent learns to avoid
                       high-ρ links where M/M/1 delay explodes.
@@ -48,6 +50,10 @@ class RewardCalculator:
                        This is the key feature: a real router's ASIC sees
                        queue depth at nanosecond granularity. OSPF/IS-IS
                        never sees this. This is WHY RL can win.
+    - progress_bonus: Encourages reducing remaining hop distance from
+                      current node to destination each step.
+    - lookahead_congestion_cost: Penalizes forwarding into neighbors whose
+                                 outgoing links are already congested.
     """
 
     def __init__(self, coeffs: RewardCoefficients | None = None):
@@ -61,6 +67,9 @@ class RewardCalculator:
         loop_drop: bool,
         invalid: bool,
         delivered: bool,
+        distance_before: float = 0.0,
+        distance_after: float = 0.0,
+        next_hop_utilization: float = 0.0,
         **kwargs,  # accept and ignore extra args for backward compat
     ) -> Tuple[float, Dict[str, float]]:
         """Calculate reward.
@@ -72,12 +81,19 @@ class RewardCalculator:
         r_lat = -self.c.latency_cost * min(hop_latency_ms / 10.0, 2.0)
         r_drop = -self.c.drop_penalty if (drop or loop_drop or invalid) else 0.0
         r_cong = -self.c.congestion_cost * queue_occupancy
+        delta_dist = max(min(distance_before - distance_after, 2.0), -2.0)
+        r_prog = self.c.progress_bonus * delta_dist
+        r_look = -self.c.lookahead_congestion_cost * max(
+            0.0, min(next_hop_utilization, 1.0)
+        )
 
         comps = {
             "delivery": r_del,
             "latency": r_lat,
             "drop": r_drop,
             "congestion": r_cong,
+            "progress": r_prog,
+            "lookahead_congestion": r_look,
         }
 
         total = sum(comps.values())
